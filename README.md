@@ -6,7 +6,7 @@ A lightweight, zero-dependency, full-featured web app that converts spoken **Per
 
 ## ✨ Features
 
-- 🎙️ **Live Continuous Persian Dictation:** High-precision speech-to-text with auto-recovery and non-stop stream recycling (prevents browser/silence drops).
+- 🎙️ **Live Continuous Persian Dictation:** High-precision speech-to-text with auto-recovery and non-stop stream recycling (prevents browser/silence drops). A single persistent microphone stream is held for the whole session so Chrome does not re-prompt for permission every ~30–60s.
 - 🏥 **Medical & Technical Dictionaries:**
   - **Comprehensive Medical Dictionary:** 40+ clinical, pharmaceutical, anatomical, diagnostic, and specialty terms (e.g. *«اکوکاردیوگرافی»*, *«آندوسکوپی»*, *«استامینوفن»*, *«هموگلوبین»*, *«سی‌تی‌اسکن»*, *«پاتولوژی»*) with built-in spoken aliases.
   - **One-Click Vocabulary Packs:** Quickly load the Medical Pack or Tech Pack with dedicated buttons in the Vocabulary Manager.
@@ -92,6 +92,31 @@ Then open `http://localhost:8080` in Chrome or Edge.
 
 - **Chrome** or **Microsoft Edge** (desktop or Android) — the Web Speech API `fa-IR` cloud endpoint is powered natively in Chromium.
 - **Microphone permission** and an **internet connection** (audio is processed securely by the browser's speech service).
+
+## ⚙️ Non-stop Recording & Microphone Permission
+
+The browser's Web Speech API does **not** stream forever: Chrome's cloud speech
+session silently ends after roughly **30–60 seconds**. This app handles that
+automatically:
+
+1. **One persistent microphone stream** is acquired when you press *Start* and
+   kept alive for the entire session. This "pins" the microphone permission, so
+   Chrome does **not** ask for permission again when the speech session is
+   recycled mid-recording.
+2. **Silent auto-reconnect** — on `end`, `network`, `no-speech`, `aborted` and
+   transient `not-allowed` events, the recognizer restarts itself with an
+   escalating backoff (and a watchdog that recovers from silent stalls), so
+   dictation continues without you doing anything.
+3. Permission errors that occur **after** a successful start are treated as
+   recoverable glitches instead of stopping the recording.
+
+> **Important:** no web page can grant microphone permission *by itself* — that
+> is a browser security rule. The app still needs you to **allow the microphone
+> once** (one click) when you start a session. After that single grant, the
+> persistent stream keeps the permission valid so the recording continues
+> non-stop. If the browser shows a permission prompt *again mid-session*, check
+> that the page is served over **HTTPS** (or `localhost`) and that the site is
+> not embedded in a cross-origin `<iframe>` without `allow="microphone"`.
 
 ---
 

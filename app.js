@@ -734,6 +734,12 @@
   let watchdogIntervalId = null;
   let retryCount = 0;
   const MAX_RETRY_DELAY = 1500;
+  let recognitionActive = false;  // true between onstart and onend/onerror
+  let hasStartedOnce = false;     // recognition successfully started this session
+  let fatalErrors = 0;            // consecutive recoverable "not-allowed" hits
+  let lastRestartAttempt = 0;     // timestamp of the last recognition.start()
+  let isStarting = false;         // guards the async startListening() path
+  const MAX_FATAL_RETRIES = 3;
 
   let lang = (() => {
     try {
@@ -1212,17 +1218,60 @@
    *  Live Audio Visualizer (Web Audio API)
    * ------------------------------------------------------------ */
 
+  // Acquire a SINGLE persistent microphone stream for the whole dictation
+  // session. Keeping this stream alive "pins" the browser's microphone
+  // permission, so Chrome does NOT ask for permission again every time the
+  // speech recognition session is silently recycled (~30–60s).
+  async function acquireMicStream() {
+    if (state.audioStream) return state.audioStream;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return null;
+    state.audioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+    return state.audioStream;
+  }
+
+  function releaseMicStream() {
+    if (state.audioStream) {
+      try {
+        state.audioStream.getTracks().forEach((track) => track.stop());
+      } catch {
+        /* ignore */
+      }
+      state.audioStream = null;
+    }
+  }
+
+  function mapMicError(err) {
+    const name = (err && (err.name || '')) || '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+      return 'not-allowed';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+      return 'audio-capture';
+    }
+    return 'audio-capture';
+  }
+
   async function startVisualizer() {
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
-      state.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!state.audioStream) {
+        state.audioStream = await acquireMicStream();
+      }
+      if (!state.audioStream) return;
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
-      state.audioContext = new AudioCtx();
-      const source = state.audioContext.createMediaStreamSource(state.audioStream);
-      state.analyser = state.audioContext.createAnalyser();
-      state.analyser.fftSize = 64;
-      source.connect(state.analyser);
+      if (!state.audioContext) {
+        state.audioContext = new AudioCtx();
+        const source = state.audioContext.createMediaStreamSource(state.audioStream);
+        state.analyser = state.audioContext.createAnalyser();
+        state.analyser.fftSize = 64;
+        source.connect(state.analyser);
+      }
 
       els.audioVisualizer.classList.add('active');
       drawVisualizer();
@@ -1236,13 +1285,10 @@
       cancelAnimationFrame(state.visualizerAnimId);
       state.visualizerAnimId = null;
     }
-    if (state.audioStream) {
-      state.audioStream.getTracks().forEach((track) => track.stop());
-      state.audioStream = null;
-    }
     if (state.audioContext) {
       state.audioContext.close().catch(() => {});
       state.audioContext = null;
+      state.analyser = null;
     }
     els.audioVisualizer.classList.remove('active');
     const ctx = els.audioVisualizer.getContext('2d');
@@ -1320,6 +1366,7 @@
       } catch {
         /* ignore */
       }
+      recognition = null;
     }
 
     const rec = new SpeechRecognition();
@@ -1329,8 +1376,11 @@
     rec.maxAlternatives = 3;
 
     rec.onstart = () => {
+      recognitionActive = true;
+      hasStartedOnce = true;
       isRestarting = false;
       retryCount = 0;
+      fatalErrors = 0;
       if (state.listening) {
         renderStatus();
       }
@@ -1382,18 +1432,37 @@
     };
 
     rec.onerror = (event) => {
+      recognitionActive = false;
       const code = event.error || 'default';
 
-      // 1. Benign / recoverable events: silence timeouts or network reconnects
+      // "not-allowed" / "service-not-allowed" are only truly fatal when the
+      // microphone permission was never granted (or was revoked). After a
+      // successful start, Chrome may surface them momentarily while recycling
+      // a cloud session — recover instead of killing the recording.
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        if (state.listening && hasStartedOnce && fatalErrors < MAX_FATAL_RETRIES) {
+          fatalErrors++;
+          scheduleRestart(600);
+        } else {
+          stopListening();
+          showError(code);
+          showToast(t().errors[code] || t().errors.default);
+        }
+        return;
+      }
+
+      // Benign / recoverable events: silence timeouts or aborts
       if (code === 'no-speech' || code === 'aborted') {
         if (state.listening) {
-          scheduleRestart(100);
+          scheduleRestart(200);
         }
         return;
       }
 
       if (code === 'network') {
-        // Cloud speech session periodic recycle (Google servers disconnect every 60s of streaming)
+        // Cloud speech session periodic recycle (Google servers end streaming
+        // sessions after ~30–60s); reconnect silently — the mic stays pinned
+        // so no permission prompt is shown.
         if (state.listening) {
           els.statusText.textContent = t().statusReconnecting;
           scheduleRestart(350);
@@ -1401,27 +1470,29 @@
         return;
       }
 
-      // 2. Fatal permission/service errors: stop recording completely
-      if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'language-not-supported') {
+      // Language not supported is genuinely fatal
+      if (code === 'language-not-supported') {
         stopListening();
         showError(code);
         showToast(t().errors[code] || t().errors.default);
         return;
       }
 
-      // 3. Temporary audio capture or other glitches: recover
+      // Temporary audio capture or other glitches: recover
       if (state.listening) {
         scheduleRestart(500);
       }
     };
 
     rec.onend = () => {
+      recognitionActive = false;
       if (state.listening) {
         // Automatically restart to keep recording continuously
-        scheduleRestart(100);
+        scheduleRestart(250);
       } else {
         stopTimer();
         stopVisualizer();
+        releaseMicStream();
         renderStatus();
       }
     };
@@ -1429,40 +1500,61 @@
     return rec;
   }
 
-  function scheduleRestart(delay = 100) {
+  function scheduleRestart(delay = 250) {
     if (!state.listening) return;
-    if (restartTimeoutId) clearTimeout(restartTimeoutId);
+    // Debounce: only one pending restart at a time.
+    if (restartTimeoutId) return;
 
     isRestarting = true;
-    const backoff = Math.min(delay + (retryCount * 200), MAX_RETRY_DELAY);
+    renderStatus();
+
+    const backoff = Math.min(delay + retryCount * 250, MAX_RETRY_DELAY);
     retryCount++;
 
     restartTimeoutId = setTimeout(() => {
+      restartTimeoutId = null;
       if (!state.listening) return;
+      // A session is still live — nothing to restart.
+      if (recognitionActive) {
+        isRestarting = false;
+        return;
+      }
+
+      lastRestartAttempt = Date.now();
       try {
-        recognition = createRecognitionInstance();
+        if (!recognition) recognition = createRecognitionInstance();
         recognition.start();
       } catch {
-        if (state.listening) {
-          scheduleRestart(400);
+        // "recognition has already started" (InvalidStateError) means the old
+        // session has not fully torn down yet. Build a fresh instance and try
+        // once more before backing off.
+        try {
+          recognition = createRecognitionInstance();
+          recognition.start();
+          lastRestartAttempt = Date.now();
+        } catch {
+          isRestarting = false;
+          if (state.listening) {
+            scheduleRestart(Math.max(delay + 300, 600));
+          }
+          return;
         }
       }
+      isRestarting = false;
     }, backoff);
   }
 
   function startWatchdog() {
     if (watchdogIntervalId) clearInterval(watchdogIntervalId);
     watchdogIntervalId = setInterval(() => {
-      if (state.listening && !isRestarting) {
-        try {
-          if (!recognition) {
-            scheduleRestart(50);
-          }
-        } catch {
-          scheduleRestart(200);
-        }
-      }
-    }, 2500);
+      if (!state.listening) return;
+      if (isRestarting) return;
+      if (recognitionActive) return;
+      // If recognition silently died without firing onend, force a restart
+      // (rate-limited so we never spam start()).
+      if (Date.now() - lastRestartAttempt < 2000) return;
+      scheduleRestart(50);
+    }, 2000);
   }
 
   function stopWatchdog() {
@@ -1472,11 +1564,31 @@
     }
   }
 
-  function startListening() {
-    if (!supported || state.listening) return;
+  async function startListening() {
+    if (!supported || state.listening || isStarting) return;
+    isStarting = true;
+
+    // Pin the microphone permission for the WHOLE session before starting.
+    // Holding a persistent stream prevents Chrome from re-asking for
+    // permission every time speech recognition is silently recycled (~30–60s).
+    try {
+      await acquireMicStream();
+    } catch (err) {
+      isStarting = false;
+      const code = mapMicError(err);
+      showError(code);
+      showToast(t().errors[code] || t().errors.default);
+      return;
+    }
+
+    isStarting = false;
     state.listening = true;
     retryCount = 0;
     isRestarting = false;
+    recognitionActive = false;
+    hasStartedOnce = false;
+    fatalErrors = 0;
+    lastRestartAttempt = Date.now();
     startTimer();
     startVisualizer();
     startWatchdog();
@@ -1498,7 +1610,10 @@
   function stopListening() {
     if (!state.listening) return;
     state.listening = false;
+    isStarting = false;
     isRestarting = false;
+    recognitionActive = false;
+    fatalErrors = 0;
     if (restartTimeoutId) {
       clearTimeout(restartTimeoutId);
       restartTimeoutId = null;
@@ -1506,6 +1621,7 @@
     stopWatchdog();
     stopTimer();
     stopVisualizer();
+    releaseMicStream();
     renderStatus();
     els.transcriptCard.classList.remove('listening');
     els.startLabel.textContent = t().start;
@@ -1515,10 +1631,15 @@
 
     if (recognition) {
       try {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.onstart = null;
         recognition.stop();
       } catch {
         /* not running */
       }
+      recognition = null;
     }
   }
 
@@ -1922,6 +2043,7 @@ ${text}
 
   function renderStatus() {
     const s = t();
+    els.statusDot.classList.remove('error');
     els.statusDot.classList.toggle('listening', state.listening);
     if (state.listening) {
       els.statusText.textContent = isRestarting ? s.statusReconnecting : s.statusListening;

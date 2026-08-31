@@ -1,4 +1,4 @@
-const CACHE_NAME = 'persian-stt-v2';
+const CACHE_NAME = 'persian-stt-v3';
 const ASSETS = [
   './',
   './index.html',

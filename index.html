@@ -4,17 +4,25 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#6366f1" />
+  <meta name="description" content="تبدیل زندهٔ گفتار فارسی به متن با پشتیبانی از کلمات تخصصی، نیم‌فاصله خودکار و فرمان‌های صوتی" />
   <title>تبدیل گفتار به متن فارسی</title>
+  
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
     rel="stylesheet"
   />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="app">
+    <!-- Header -->
     <header class="app-header">
       <div class="brand">
         <div class="logo" aria-hidden="true">
@@ -28,11 +36,24 @@
         </div>
         <div class="brand-text">
           <h1 data-i18n="title">تبدیل گفتار به متن فارسی</h1>
-          <p data-i18n="subtitle">دیکتهٔ زنده با Web Speech API</p>
+          <p data-i18n="subtitle">دیکتهٔ زنده با پشتیبانی از کلمات تخصصی و نیم‌فاصله</p>
         </div>
       </div>
       <div class="header-actions">
-        <button id="helpBtn" class="icon-btn" type="button" aria-label="راهنمای دستورها">
+        <!-- Vocabulary Manager Button -->
+        <button id="vocabBtn" class="icon-btn" type="button" aria-label="واژه‌نامه تخصصی" title="واژه‌نامه تخصصی">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            <path d="M8 7h8" />
+            <path d="M8 11h6" />
+          </svg>
+          <span class="badge" id="vocabBadge">0</span>
+        </button>
+
+        <!-- Help Button -->
+        <button id="helpBtn" class="icon-btn" type="button" aria-label="راهنمای دستورها" title="راهنما و کلیدهای میانبر">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="10" />
@@ -40,6 +61,8 @@
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
         </button>
+
+        <!-- Language Toggle -->
         <button id="langToggle" class="lang-toggle" type="button" aria-label="Switch language">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -52,15 +75,22 @@
       </div>
     </header>
 
+    <!-- Browser Warning Notice -->
     <div id="unsupported" class="notice notice--error" hidden>
       <strong data-i18n="unsupportedTitle">مرورگر شما از Web Speech API پشتیبانی نمی‌کند</strong>
-      <span data-i18n="unsupportedText">لطفاً از Chrome یا Edge استفاده کنید.</span>
+      <span data-i18n="unsupportedText">لطفاً از Chrome یا Edge استفاده کنید. تشخیص گفتار نیازمند اتصال اینترنت است.</span>
     </div>
 
+    <!-- Status & Visualizer Row -->
     <div class="status-row">
       <span id="statusDot" class="status-dot" aria-hidden="true"></span>
       <span id="statusText" class="status-text">آمادهٔ شنیدن</span>
+      
+      <!-- Audio Visualizer Canvas -->
+      <canvas id="audioVisualizer" class="audio-visualizer" width="120" height="24" aria-hidden="true"></canvas>
+
       <span class="status-spacer"></span>
+      
       <span class="chip" title="Recognition language">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -73,12 +103,67 @@
       <span class="timer" id="timer">00:00</span>
     </div>
 
+    <!-- Editor Toolbar -->
+    <div class="editor-toolbar">
+      <div class="toolbar-toggles">
+        <!-- ZWNJ Auto Formatter Toggle -->
+        <button id="toggleZwnj" class="tool-btn active" type="button" role="switch" aria-checked="true"
+                title="اصلاح خودکار نیم‌فاصله (می‌،‌ها،‌تر)" data-i18n-title="tooltipZwnj">
+          <span class="tool-icon">‌</span>
+          <span data-i18n="smartZwnj">نیم‌فاصله هوشمند</span>
+        </button>
+
+        <!-- Persian Digits Toggle -->
+        <button id="toggleDigits" class="tool-btn active" type="button" role="switch" aria-checked="true"
+                title="تبدیل اعداد به ارقام فارسی (۱۲۳)" data-i18n-title="tooltipDigits">
+          <span class="tool-icon digits-icon">۱۲۳</span>
+          <span data-i18n="persianDigits">اعداد فارسی</span>
+        </button>
+      </div>
+
+      <div class="toolbar-actions">
+        <!-- Clean & Reformat Text -->
+        <button id="formatBtn" class="tool-btn tool-btn--ghost" type="button"
+                title="اصلاح و پاکسازی نگارشی کل متن" data-i18n-title="tooltipFormat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>
+          </svg>
+          <span data-i18n="formatText">پاکسازی نگارشی</span>
+        </button>
+
+        <!-- Undo Button -->
+        <button id="undoBtn" class="tool-btn tool-btn--icon" type="button" disabled
+                title="واگرد (Ctrl+Z)" data-i18n-title="tooltipUndo" aria-label="Undo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="9 14 4 9 9 4" />
+            <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+          </svg>
+        </button>
+
+        <!-- Redo Button -->
+        <button id="redoBtn" class="tool-btn tool-btn--icon" type="button" disabled
+                title="ازنو (Ctrl+Y)" data-i18n-title="tooltipRedo" aria-label="Redo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="15 14 20 9 15 4" />
+            <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Transcript Card -->
     <main class="transcript-card">
-      <div id="transcript" class="transcript" role="log" aria-live="polite"
-           data-placeholder="متن گفتار شما اینجا نمایش داده می‌شود…"></div>
+      <div id="transcript" class="transcript" role="textbox" aria-multiline="true"
+           contenteditable="true" spellcheck="false"
+           data-placeholder="متن گفتار شما اینجا نمایش داده می‌شود یا می‌توانید مستقیماً تایپ و ویرایش کنید…"></div>
     </main>
 
+    <!-- Controls -->
     <div class="controls">
+      <!-- Record Primary Button -->
       <button id="startBtn" class="btn btn-primary" type="button">
         <span class="btn-icon" id="startIconMic" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -96,8 +181,10 @@
           </svg>
         </span>
         <span id="startLabel" data-i18n="start">شروع گفتار</span>
+        <span class="btn-shortcut-hint" aria-hidden="true">Space</span>
       </button>
 
+      <!-- Secondary Buttons & Export Dropdown -->
       <div class="controls-secondary">
         <button id="copyBtn" class="btn btn-ghost" type="button" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -107,15 +194,56 @@
           </svg>
           <span data-i18n="copy">کپی</span>
         </button>
-        <button id="downloadBtn" class="btn btn-ghost" type="button" disabled>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          <span data-i18n="download">دانلود</span>
-        </button>
+
+        <!-- Export Dropdown Container -->
+        <div class="export-dropdown-container">
+          <button id="exportDropdownBtn" class="btn btn-ghost" type="button" disabled aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span data-i18n="export">خروجی</span>
+            <svg class="chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          
+          <div id="exportMenu" class="dropdown-menu" hidden>
+            <button id="downloadTxtBtn" class="dropdown-item" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+              <span data-i18n="downloadTxt">فایل متنی (.txt)</span>
+            </button>
+            <button id="downloadMdBtn" class="dropdown-item" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <path d="M9 15v-6l2 2 2-2v6" />
+              </svg>
+              <span data-i18n="downloadMd">مارک‌داون (.md)</span>
+            </button>
+            <button id="printBtn" class="dropdown-item" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 6 2 18 2 18 9" />
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                <rect x="6" y="14" width="12" height="8" />
+              </svg>
+              <span data-i18n="printPdf">چاپ / خروجی PDF</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Clear Button -->
         <button id="clearBtn" class="btn btn-ghost" type="button" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -129,6 +257,7 @@
       </div>
     </div>
 
+    <!-- Quick Hint -->
     <div class="hint">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -136,9 +265,10 @@
         <line x1="12" y1="16" x2="12" y2="12" />
         <line x1="12" y1="8" x2="12.01" y2="8" />
       </svg>
-      <span data-i18n="hint">نکته: در حال ضبط بگویید «راهنما» تا فهرست فرمان‌ها را ببینید.</span>
+      <span data-i18n="hint">نکته: در حال ضبط بگویید «راهنما» یا کلید Space را بزنید تا ضبط شروع/متوقف شود.</span>
     </div>
 
+    <!-- Stats -->
     <div class="stats" aria-label="Statistics">
       <div class="stat">
         <span class="stat-value" id="wordCount">0</span>
@@ -155,15 +285,16 @@
     </div>
 
     <footer class="footer">
-      <p data-i18n="footerNote">تشخیص گفتار فارسی همیشه با زبان fa-IR انجام می‌شود.</p>
+      <p data-i18n="footerNote">تشخیص گفتار با Web Speech API • بدون وابستگی خارجی و کاملاً سمت کاربر</p>
     </footer>
   </div>
 
+  <!-- Help & Shortcuts Modal -->
   <div id="helpModal" class="modal" hidden>
     <div class="modal-backdrop" id="helpBackdrop"></div>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
       <div class="modal-header">
-        <h2 id="helpTitle" data-i18n="helpTitle">دستورهای صوتی</h2>
+        <h2 id="helpTitle" data-i18n="helpTitle">دستورهای صوتی و کلیدهای میانبر</h2>
         <button id="helpClose" class="icon-btn" type="button" aria-label="بستن">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -172,18 +303,190 @@
           </svg>
         </button>
       </div>
-      <p class="modal-sub" data-i18n="helpSub">در حال ضبط، این فرمان‌ها را بگویید — فرمان‌ها از متن حذف می‌شوند:</p>
+      
+      <p class="modal-sub" data-i18n="helpSub">در حال ضبط، این فرمان‌ها را بگویید — فرمان‌ها از متن حذف و اجرا می‌شوند:</p>
+
+      <!-- Keyboard Shortcuts -->
       <div class="help-group">
-        <h3 class="help-group-title" data-i18n="helpControl">کنترل برنامه</h3>
+        <h3 class="help-group-title" data-i18n="helpShortcuts">کلیدهای میانبر کیبورد</h3>
+        <ul class="help-list shortcuts-list">
+          <li>
+            <span class="shortcut-keys"><kbd>Space</kbd> / <kbd>Alt+S</kbd></span>
+            <span class="help-action" data-i18n="shortcutToggle">شروع / توقف ضبط گفتار</span>
+          </li>
+          <li>
+            <span class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>Z</kbd></span>
+            <span class="help-action" data-i18n="shortcutUndo">واگرد (Undo) تغییرات</span>
+          </li>
+          <li>
+            <span class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>Y</kbd> / <kbd>Ctrl+Shift+Z</kbd></span>
+            <span class="help-action" data-i18n="shortcutRedo">ازنو (Redo) تغییرات</span>
+          </li>
+          <li>
+            <span class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd></span>
+            <span class="help-action" data-i18n="shortcutCopy">کپی کل متن</span>
+          </li>
+          <li>
+            <span class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>S</kbd></span>
+            <span class="help-action" data-i18n="shortcutSave">ذخیره / دانلود سریع فایل</span>
+          </li>
+          <li>
+            <span class="shortcut-keys"><kbd>Esc</kbd></span>
+            <span class="help-action" data-i18n="shortcutEsc">بستن پنجره‌های باز</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- App Controls Voice Commands -->
+      <div class="help-group">
+        <h3 class="help-group-title" data-i18n="helpControl">کنترل برنامه با گفتار</h3>
         <ul id="helpListControl" class="help-list"></ul>
       </div>
+
+      <!-- Punctuation Voice Commands -->
       <div class="help-group">
-        <h3 class="help-group-title" data-i18n="helpPunct">نشانه‌گذاری</h3>
+        <h3 class="help-group-title" data-i18n="helpPunct">نشانه‌گذاری با گفتار</h3>
         <ul id="helpListPunct" class="help-list"></ul>
       </div>
     </div>
   </div>
 
+  <!-- Custom Vocabulary & Special Words Modal -->
+  <div id="vocabModal" class="modal" hidden>
+    <div class="modal-backdrop" id="vocabBackdrop"></div>
+    <div class="modal-card modal-card--lg" role="dialog" aria-modal="true" aria-labelledby="vocabTitle">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <h2 id="vocabTitle" data-i18n="vocabTitle">واژه‌نامه تخصصی و کلمات کلیدی</h2>
+          <span class="badge" id="vocabCountBadge">0 واژه</span>
+        </div>
+        <button id="vocabClose" class="icon-btn" type="button" aria-label="بستن">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <p class="modal-sub" data-i18n="vocabSub">
+        کلمات تخصصی، اصطلاحات فنی، نام برندها یا اسامی را اضافه کنید تا سیستم تلفظ‌ها و خطاهای شنیداری را به‌صورت هوشمند تصحیح و شناسایی کند:
+      </p>
+
+      <!-- Add Word Form -->
+      <form id="vocabForm" class="vocab-form" autocomplete="off">
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="vocabCanonical" data-i18n="vocabLabelCanonical">کلمه یا عبارت اصلی (نگارش صحیح)</label>
+            <input type="text" id="vocabCanonical" class="input-field" placeholder="مثال: کوبرنتیس" required />
+          </div>
+          <div class="form-group flex-3">
+            <label for="vocabAliases" data-i18n="vocabLabelAliases">خطاهای شنیداری و تلفظ‌ها (با ویرگول یا کاما جدا کنید)</label>
+            <input type="text" id="vocabAliases" class="input-field" placeholder="مثال: کوبرنتیز، کوبر نیتس، کوبرنتس" />
+          </div>
+          <div class="form-group flex-1">
+            <label for="vocabCategory" data-i18n="vocabLabelCategory">دسته‌بندی</label>
+            <select id="vocabCategory" class="input-field select-field">
+              <option value="tech" data-i18n="catTech">فناوری و نرم‌افزار</option>
+              <option value="ai" data-i18n="catAi">هوش مصنوعی</option>
+              <option value="general" data-i18n="catGeneral">عمومی / اداری</option>
+              <option value="medical" data-i18n="catMedical">پزشکی و علمی</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit" id="vocabSubmitBtn" class="btn btn-primary btn-sm">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          <span data-i18n="vocabAddBtn">افزودن کلمه</span>
+        </button>
+      </form>
+
+      <!-- Presets Bar -->
+      <div class="vocab-presets-bar">
+        <span class="vocab-presets-label" data-i18n="vocabPresetsLabel">بسته‌های تخصصی آماده:</span>
+        <div class="vocab-presets-buttons">
+          <button type="button" id="loadMedPackBtn" class="preset-btn preset-btn--med" title="بارگذاری واژگان تخصصی پزشکی">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+              <path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27" />
+            </svg>
+            <span data-i18n="presetMed">واژه‌نامه جامع پزشکی</span>
+          </button>
+          <button type="button" id="loadTechPackBtn" class="preset-btn preset-btn--tech" title="بارگذاری واژگان برنامه‌نویسی و کامپیوتر">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+            <span data-i18n="presetTech">واژه‌نامه فناوری و IT</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Search and Filter Bar -->
+      <div class="vocab-toolbar">
+        <div class="search-input-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input type="search" id="vocabSearch" class="input-field input-search"
+                 placeholder="جستجو در کلمات یا خطاها…" data-i18n-placeholder="vocabSearchPlaceholder" />
+        </div>
+        <div class="vocab-filter-pills" id="vocabCategoryFilters">
+          <button type="button" class="filter-pill active" data-category="all" data-i18n="filterAll">همه</button>
+          <button type="button" class="filter-pill" data-category="tech" data-i18n="catTech">فناوری</button>
+          <button type="button" class="filter-pill" data-category="ai" data-i18n="catAi">هوش مصنوعی</button>
+          <button type="button" class="filter-pill" data-category="general" data-i18n="catGeneral">عمومی</button>
+          <button type="button" class="filter-pill" data-category="medical" data-i18n="catMedical">پزشکی</button>
+        </div>
+      </div>
+
+      <!-- Vocabulary Items List -->
+      <div class="vocab-list-container">
+        <ul id="vocabList" class="vocab-list"></ul>
+        <div id="vocabEmpty" class="vocab-empty" hidden data-i18n="vocabEmpty">واژه‌ای یافت نشد.</div>
+      </div>
+
+      <!-- Footer Management Actions -->
+      <div class="vocab-footer">
+        <div class="vocab-footer-left">
+          <button id="vocabExportBtn" class="btn btn-ghost btn-sm" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span data-i18n="vocabExport">پشتیبان‌گیری (JSON)</span>
+          </button>
+          <label id="vocabImportBtn" class="btn btn-ghost btn-sm" for="vocabFileInput" style="cursor: pointer;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <span data-i18n="vocabImport">درون‌ریزی (JSON)</span>
+          </label>
+          <input type="file" id="vocabFileInput" accept=".json" hidden />
+        </div>
+        <button id="vocabResetBtn" class="btn btn-ghost btn-sm btn-ghost--danger" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+          <span data-i18n="vocabReset">بازنشانی پیش‌فرض</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>
